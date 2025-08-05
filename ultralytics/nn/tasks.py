@@ -324,30 +324,29 @@ class BaseModel(torch.nn.Module):
                 len_updated_csd += 1
         if verbose:
             LOGGER.info(f"Transferred {len_updated_csd}/{len(self.model.state_dict())} items from pretrained weights")
-
+            
     def loss(self, batch, preds=None):
-        """
-        Custom loss function untuk corner points (8 koordinat).
-        """
         pred = preds[0] if isinstance(preds, (list, tuple)) else preds  # (B, A, 8 + nc)
-        target = batch["bboxes"]  # (B, N, 9), format: class x1 y1 x2 y2 x3 y3 x4 y4
+        target = batch["bboxes"]  # (B, N, 9): class_id + 4 points
     
-        # Ambil prediksi sudut (asumsi: pred[..., :8] = 4 titik, pred[..., 8:] = class logits)
         pred_corners = pred[..., :8]
-        pred_cls = pred[..., 8:]
+        true_corners = target[..., 1:]
     
-        true_corners = target[..., 1:]  # buang class_id
+        loss_corner = F.l1_loss(pred_corners, true_corners, reduction='mean')
     
-        # Loss koordinat sudut (pakai L1 atau MSE)
-        loss_corners = F.l1_loss(pred_corners, true_corners, reduction='mean')
+        # Loss klasifikasi
+        pred_cls = pred[..., 8:]  # assume nc=1
+        tcls = target[..., 0].unsqueeze(-1)  # ground truth class
+        loss_cls = F.binary_cross_entropy_with_logits(pred_cls, tcls)
     
-        # Loss klasifikasi (pakai BCE atau CE tergantung task)
-        tcls = target[..., 0].long()
-        loss_cls = F.cross_entropy(pred_cls, tcls)
+        loss = loss_corner + loss_cls
     
-        loss = loss_corners + loss_cls
-    
-        return {"loss": loss, "loss_corners": loss_corners, "loss_cls": loss_cls}
+        return {
+            "loss": loss,
+            "loss_corner": loss_corner,
+            "loss_cls": loss_cls
+        }
+
 
 
     def init_criterion(self):
