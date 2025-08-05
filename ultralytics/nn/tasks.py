@@ -327,17 +327,28 @@ class BaseModel(torch.nn.Module):
 
     def loss(self, batch, preds=None):
         """
-        Compute loss.
-
-        Args:
-            batch (dict): Batch to compute loss on.
-            preds (torch.Tensor | List[torch.Tensor], optional): Predictions.
+        Custom loss function untuk corner points (8 koordinat).
         """
-        if getattr(self, "criterion", None) is None:
-            self.criterion = self.init_criterion()
+        pred = preds[0] if isinstance(preds, (list, tuple)) else preds  # (B, A, 8 + nc)
+        target = batch["bboxes"]  # (B, N, 9), format: class x1 y1 x2 y2 x3 y3 x4 y4
+    
+        # Ambil prediksi sudut (asumsi: pred[..., :8] = 4 titik, pred[..., 8:] = class logits)
+        pred_corners = pred[..., :8]
+        pred_cls = pred[..., 8:]
+    
+        true_corners = target[..., 1:]  # buang class_id
+    
+        # Loss koordinat sudut (pakai L1 atau MSE)
+        loss_corners = F.l1_loss(pred_corners, true_corners, reduction='mean')
+    
+        # Loss klasifikasi (pakai BCE atau CE tergantung task)
+        tcls = target[..., 0].long()
+        loss_cls = F.cross_entropy(pred_cls, tcls)
+    
+        loss = loss_corners + loss_cls
+    
+        return {"loss": loss, "loss_corners": loss_corners, "loss_cls": loss_cls}
 
-        preds = self.forward(batch["img"]) if preds is None else preds
-        return self.criterion(preds, batch)
 
     def init_criterion(self):
         """Initialize the loss criterion for the BaseModel."""
